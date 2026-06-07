@@ -7,6 +7,8 @@
     <string name="longitude_label">Longitude</string>
     <string name="address_label">Address</string>
     <string name="address_lookup_in_progress">Looking up address…</string>
+    <string name="address_copied_to_clipboard">Address copied to clipboard</string>
+    <string name="address_value_description">Resolved address. Tap to copy to clipboard.</string>
     <string name="no_gps_coordinates">This image has no GPS coordinates.</string>
     <string name="open_in_maps">Open in Maps</string>
     <string name="timestamp_not_available">Not available</string>

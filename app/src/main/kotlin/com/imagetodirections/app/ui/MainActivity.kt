@@ -1,6 +1,9 @@
 package com.imagetodirections.app.ui
 
 import android.content.ActivityNotFoundException
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.net.Uri
@@ -51,6 +54,9 @@ class MainActivity : AppCompatActivity() {
     /** In-flight reverse-geocoding job, cancelled when a new image is selected. */
     private var reverseGeocodeJob: Job? = null
 
+    /** Resolved address from the most recent reverse-geocoding lookup. */
+    private var resolvedAddress: String? = null
+
     /**
      * Receives the URI chosen by the system document picker.
      */
@@ -81,6 +87,11 @@ class MainActivity : AppCompatActivity() {
         // Open the downloaded map image in an external image viewer.
         binding.locationMapThumbnail.setOnClickListener {
             openLocationMapInImageViewer()
+        }
+
+        // Copy the resolved address when the user taps it.
+        binding.addressValue.setOnClickListener {
+            copyResolvedAddressToClipboard()
         }
     }
 
@@ -196,6 +207,7 @@ class MainActivity : AppCompatActivity() {
             selectedLatitude = null
             selectedLongitude = null
             locationMapFile = null
+            resolvedAddress = null
             mapThumbnailJob?.cancel()
             reverseGeocodeJob?.cancel()
 
@@ -216,6 +228,7 @@ class MainActivity : AppCompatActivity() {
      */
     private fun loadLocationAddress(latitude: Double, longitude: Double) {
         reverseGeocodeJob?.cancel()
+        resolvedAddress = null
         binding.addressLabel.visibility = View.VISIBLE
         binding.addressValue.visibility = View.VISIBLE
         binding.addressValue.text = getString(R.string.address_lookup_in_progress)
@@ -226,9 +239,26 @@ class MainActivity : AppCompatActivity() {
                 longitude = longitude,
             )
 
+            resolvedAddress = address
             binding.addressValue.text = address
                 ?: getString(R.string.timestamp_not_available)
         }
+    }
+
+    /**
+     * Copies the resolved address to the system clipboard.
+     */
+    private fun copyResolvedAddressToClipboard() {
+        val address = resolvedAddress ?: return
+
+        val clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboardManager.setPrimaryClip(ClipData.newPlainText("address", address))
+
+        Toast.makeText(
+            this,
+            getString(R.string.address_copied_to_clipboard),
+            Toast.LENGTH_SHORT,
+        ).show()
     }
 
     /**
