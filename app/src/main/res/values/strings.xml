@@ -1,0 +1,19 @@
+<resources>
+    <string name="app_name">Image to Directions</string>
+    <string name="title_screen_heading">Image to Directions</string>
+    <string name="browse">Browse</string>
+    <string name="timestamp_label">Timestamp</string>
+    <string name="latitude_label">Latitude</string>
+    <string name="longitude_label">Longitude</string>
+    <string name="address_label">Address</string>
+    <string name="address_lookup_in_progress">Looking up address…</string>
+    <string name="no_gps_coordinates">This image has no GPS coordinates.</string>
+    <string name="open_in_maps">Open in Maps</string>
+    <string name="timestamp_not_available">Not available</string>
+    <string name="error_reading_image">Could not read the selected image.</string>
+    <string name="error_parsing_image">Could not parse the selected image metadata.</string>
+    <string name="error_no_maps_app">No mapping application is installed.</string>
+    <string name="location_map_thumbnail_description">Map thumbnail of the photo location. Tap to open in an image viewer.</string>
+    <string name="error_loading_map_thumbnail">Could not load the location map thumbnail.</string>
+    <string name="error_no_image_viewer">No image viewer is installed.</string>
+</resources>
