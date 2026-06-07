@@ -1,5 +1,6 @@
 package com.imagetodirections.app.ui
 
+import android.Manifest
 import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -17,12 +18,15 @@ import androidx.core.content.FileProvider
 import androidx.lifecycle.lifecycleScope
 import com.imagetodirections.app.R
 import com.imagetodirections.app.databinding.ActivityMainBinding
+import com.imagetodirections.app.exif.ExifContentUriOpener
 import com.imagetodirections.app.exif.ExifMetadataReader
 import com.imagetodirections.app.exif.ExifTimestampFormatter
 import com.imagetodirections.app.exif.GpsCoordinateFormatter
 import com.imagetodirections.app.exif.ImageMetadata
+import com.imagetodirections.app.exif.MediaLocationPermissionHelper
 import com.imagetodirections.app.geocode.ReverseGeocoder
 import com.imagetodirections.app.map.LocationMapThumbnailLoader
+import com.imagetodirections.app.share.ShareIntentHandler
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import java.io.File
@@ -31,9 +35,9 @@ import java.io.FileInputStream
 /**
  * Main screen for selecting a JPEG image and displaying its EXIF metadata.
  *
- * The user can browse for an image, view timestamp and GPS coordinates when present,
- * see a reverse-geocoded address, preview a map thumbnail of the location, and open
- * the location in a maps application.
+ * The user can browse for an image or receive one from another app's share sheet,
+ * view timestamp and GPS coordinates when present, see a reverse-geocoded address,
+ * preview a map thumbnail of the location, and open the location in a maps application.
  */
 class MainActivity : AppCompatActivity() {
 
@@ -57,6 +61,9 @@ class MainActivity : AppCompatActivity() {
     /** Resolved address from the most recent reverse-geocoding lookup. */
     private var resolvedAddress: String? = null
 
+    /** Image URI waiting for ACCESS_MEDIA_LOCATION before EXIF can be read. */
+    private var pendingContentUri: Uri? = null
+
     /**
      * Receives the URI chosen by the system document picker.
      */
@@ -67,6 +74,26 @@ class MainActivity : AppCompatActivity() {
             return@registerForActivityResult
         }
         processSelectedImage(contentUri)
+    }
+
+    /**
+     * Requests photo location access needed for GPS EXIF in shared MediaStore images.
+     */
+    private val requestMediaLocationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { isGranted ->
+        val contentUri = pendingContentUri
+        pendingContentUri = null
+
+        if (contentUri == null) {
+            return@registerForActivityResult
+        }
+
+        if (!isGranted) {
+            Log.w(TAG, "ACCESS_MEDIA_LOCATION denied; GPS EXIF may be unavailable")
+        }
+
+        processSelectedImageWithPermission(contentUri)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -93,49 +120,135 @@ class MainActivity : AppCompatActivity() {
         binding.addressValue.setOnClickListener {
             copyResolvedAddressToClipboard()
         }
+
+        handleIncomingIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIncomingIntent(intent)
+    }
+
+    /**
+     * Processes a shared JPEG image when another app sends ACTION_SEND to this activity.
+     */
+    private fun handleIncomingIntent(intent: Intent?) {
+        if (!ShareIntentHandler.isShareImageIntent(intent)) {
+            return
+        }
+
+        val shareIntent = intent ?: return
+        val contentUri = ShareIntentHandler.extractSharedImageUri(shareIntent)
+        if (contentUri == null) {
+            Toast.makeText(
+                this,
+                getString(R.string.error_shared_image_missing),
+                Toast.LENGTH_SHORT,
+            ).show()
+            clearShareIntent()
+            return
+        }
+
+        if (!ShareIntentHandler.isJpegImage(contentResolver, shareIntent, contentUri)) {
+            val mimeType = ShareIntentHandler.resolveImageMimeType(
+                contentResolver,
+                shareIntent,
+                contentUri,
+            ) ?: getString(R.string.error_shared_image_mime_type_unknown)
+
+            Toast.makeText(
+                this,
+                getString(R.string.error_shared_image_not_jpeg, mimeType),
+                Toast.LENGTH_SHORT,
+            ).show()
+            clearShareIntent()
+            return
+        }
+
+        shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        setIntent(shareIntent)
+        processSelectedImage(contentUri)
+    }
+
+    /**
+     * Replaces the share intent so configuration changes do not reprocess the same image.
+     */
+    private fun clearShareIntent() {
+        setIntent(
+            Intent(this, MainActivity::class.java).apply {
+                action = Intent.ACTION_MAIN
+            },
+        )
     }
 
     /**
      * Copies the selected image, parses EXIF metadata, and updates the screen.
      */
     private fun processSelectedImage(contentUri: Uri) {
-        grantReadPermission(contentUri)
-
-        // Copy the original file bytes into app cache so EXIF can be read reliably.
-        val imageFile = copyImageToCache(contentUri)
-        if (imageFile == null) {
-            Toast.makeText(
-                this,
-                getString(R.string.error_reading_image),
-                Toast.LENGTH_SHORT,
-            ).show()
+        if (MediaLocationPermissionHelper.isRequired() &&
+            !MediaLocationPermissionHelper.hasPermission(this)
+        ) {
+            pendingContentUri = contentUri
+            requestMediaLocationPermissionLauncher.launch(
+                Manifest.permission.ACCESS_MEDIA_LOCATION,
+            )
             return
         }
 
-        // Parse timestamp and GPS, retrying against the original URI when needed.
-        val metadata = ExifMetadataReader.readWithUriFallback(
-            imagePath = imageFile.absolutePath,
-            contentResolver = contentResolver,
-            contentUri = contentUri,
-        )
-        if (metadata == null) {
-            Toast.makeText(
-                this,
-                getString(R.string.error_parsing_image),
-                Toast.LENGTH_SHORT,
-            ).show()
-            return
-        }
-
-        if (!metadata.hasGps) {
-            Log.w(TAG, "No GPS found in EXIF for ${imageFile.absolutePath}")
-        }
-
-        displayMetadata(metadata)
+        processSelectedImageWithPermission(contentUri)
     }
 
     /**
-     * Keeps read access to the selected document across future image picks.
+     * Reads EXIF from the selected image after any required permissions are granted.
+     */
+    private fun processSelectedImageWithPermission(contentUri: Uri) {
+        try {
+            grantReadPermission(contentUri)
+
+            // Copy the original file bytes into app cache so EXIF can be read reliably.
+            val imageFile = copyImageToCache(contentUri)
+            if (imageFile == null) {
+                Toast.makeText(
+                    this,
+                    getString(R.string.error_reading_image),
+                    Toast.LENGTH_SHORT,
+                ).show()
+                return
+            }
+
+            // Parse timestamp and GPS, retrying against the original URI when needed.
+            val metadata = ExifMetadataReader.readWithUriFallback(
+                imagePath = imageFile.absolutePath,
+                contentResolver = contentResolver,
+                contentUri = contentUri,
+            )
+            if (metadata == null) {
+                Toast.makeText(
+                    this,
+                    getString(R.string.error_parsing_image),
+                    Toast.LENGTH_SHORT,
+                ).show()
+                return
+            }
+
+            if (!metadata.hasGps) {
+                Log.w(TAG, "No GPS found in EXIF for ${imageFile.absolutePath}")
+            }
+
+            displayMetadata(metadata)
+        } finally {
+            if (ShareIntentHandler.isShareImageIntent(intent)) {
+                clearShareIntent()
+            }
+        }
+    }
+
+    /**
+     * Keeps read access to browse-picked documents across future image picks.
+     *
+     * Shared image URIs do not support persistable permissions and are read using
+     * the temporary grant from the sending app.
      */
     private fun grantReadPermission(contentUri: Uri) {
         try {
@@ -156,8 +269,10 @@ class MainActivity : AppCompatActivity() {
     private fun copyImageToCache(contentUri: Uri): File? {
         return try {
             val cacheFile = File(cacheDir, "selected_image.jpg")
-            val parcelFileDescriptor = contentResolver.openFileDescriptor(contentUri, "r")
-                ?: return null
+            val parcelFileDescriptor = ExifContentUriOpener.openFileDescriptor(
+                contentResolver,
+                contentUri,
+            ) ?: return null
 
             // Copy through a file descriptor to preserve the original JPEG bytes.
             parcelFileDescriptor.use { fileDescriptor ->

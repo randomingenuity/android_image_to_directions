@@ -13,4 +13,15 @@ data class ImageMetadata(
     val latitude: Double?,
     val longitude: Double?,
     val hasGps: Boolean,
-)
+) {
+
+    /**
+     * Returns whether the metadata contains usable GPS coordinates.
+     */
+    fun hasValidGps(): Boolean {
+        return hasGps &&
+            latitude != null &&
+            longitude != null &&
+            GpsCoordinateParser.isPlausibleGpsCoordinates(latitude, longitude)
+    }
+}

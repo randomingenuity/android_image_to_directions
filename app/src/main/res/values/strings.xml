@@ -13,6 +13,9 @@
     <string name="open_in_maps">Open in Maps</string>
     <string name="timestamp_not_available">Not available</string>
     <string name="error_reading_image">Could not read the selected image.</string>
+    <string name="error_shared_image_not_jpeg">Only JPEG images can be shared to this app: %1$s</string>
+    <string name="error_shared_image_mime_type_unknown">unknown</string>
+    <string name="error_shared_image_missing">No image was found in the share.</string>
     <string name="error_parsing_image">Could not parse the selected image metadata.</string>
     <string name="error_no_maps_app">No mapping application is installed.</string>
     <string name="location_map_thumbnail_description">Map thumbnail of the photo location. Tap to open in an image viewer.</string>

@@ -23,17 +23,21 @@ object ExifMetadataReader {
     }
 
     /**
-     * Reads EXIF metadata directly from a content URI stream.
+     * Reads EXIF metadata directly from a content URI.
      *
      * @param contentResolver Resolver used to open the selected image URI.
-     * @param contentUri URI returned by the document picker.
+     * @param contentUri URI returned by the document picker or share intent.
      * @return Parsed metadata, or null when the stream cannot be read.
      */
     fun readFromUri(contentResolver: ContentResolver, contentUri: Uri): ImageMetadata? {
         return try {
-            contentResolver.openInputStream(contentUri)?.use { inputStream ->
-                readExifInterface(ExifInterface(inputStream))
-            }
+            ExifContentUriOpener.openFileDescriptor(contentResolver, contentUri)
+                ?.use { parcelFileDescriptor ->
+                    readExifInterface(ExifInterface(parcelFileDescriptor.fileDescriptor))
+                }
+                ?: ExifContentUriOpener.openInputStream(contentResolver, contentUri)?.use { inputStream ->
+                    readExifInterface(ExifInterface(inputStream))
+                }
         } catch (exception: Exception) {
             Log.w(TAG, "Could not read EXIF from content URI", exception)
             null
@@ -44,11 +48,11 @@ object ExifMetadataReader {
      * Reads EXIF from a cached file and falls back to the original content URI.
      *
      * Some content providers strip GPS data from copied streams. When the cached
-     * file has no GPS, this method retries against the original URI.
+     * file has no valid GPS, this method retries against the original URI.
      *
      * @param imagePath Absolute path to the cached copy of the selected image.
      * @param contentResolver Resolver used to open the selected image URI.
-     * @param contentUri URI returned by the document picker.
+     * @param contentUri URI returned by the document picker or share intent.
      * @return Parsed metadata, or null when EXIF cannot be read.
      */
     fun readWithUriFallback(
@@ -58,21 +62,24 @@ object ExifMetadataReader {
     ): ImageMetadata? {
         return try {
             val metadataFromFile = readFromFile(imagePath)
-
-            // Return immediately when the cached file already contains GPS data.
-            if (metadataFromFile.hasGps) {
-                return metadataFromFile
-            }
-
-            // Retry against the original URI when GPS was stripped from the cache copy.
             val metadataFromUri = readFromUri(contentResolver, contentUri)
-            if (metadataFromUri != null && metadataFromUri.hasGps) {
-                return metadataFromUri.copy(
-                    timestamp = metadataFromFile.timestamp ?: metadataFromUri.timestamp,
-                )
+            val metadataWithGps = listOfNotNull(metadataFromUri, metadataFromFile)
+                .firstOrNull { metadata -> metadata.hasValidGps() }
+
+            if (metadataWithGps != null) {
+                val timestamp = metadataFromFile.timestamp
+                    ?: metadataFromUri?.timestamp
+                    ?: metadataWithGps.timestamp
+
+                return metadataWithGps.copy(timestamp = timestamp)
             }
 
-            metadataFromFile
+            val metadataWithoutGps = metadataFromFile.withoutInvalidGps()
+            if (metadataWithoutGps.timestamp == null && metadataFromUri?.timestamp != null) {
+                return metadataWithoutGps.copy(timestamp = metadataFromUri.timestamp)
+            }
+
+            metadataWithoutGps
         } catch (exception: Exception) {
             Log.e(TAG, "Failed to read EXIF metadata", exception)
             null
@@ -91,6 +98,21 @@ object ExifMetadataReader {
             latitude = coordinates?.first,
             longitude = coordinates?.second,
             hasGps = coordinates != null,
+        )
+    }
+
+    /**
+     * Clears bogus GPS values while keeping the rest of the metadata intact.
+     */
+    private fun ImageMetadata.withoutInvalidGps(): ImageMetadata {
+        if (!hasGps || hasValidGps()) {
+            return this
+        }
+
+        return copy(
+            latitude = null,
+            longitude = null,
+            hasGps = false,
         )
     }
 
@@ -120,13 +142,21 @@ object ExifMetadataReader {
             reference = exifInterface.getAttribute(ExifInterface.TAG_GPS_LONGITUDE_REF),
         )
         if (latitude != null && longitude != null) {
-            return Pair(latitude, longitude)
+            if (GpsCoordinateParser.isPlausibleGpsCoordinates(latitude, longitude)) {
+                return Pair(latitude, longitude)
+            }
+
+            return null
         }
 
         // Fall back to the library helper when raw GPS tags are unavailable.
         val latLong = FloatArray(2)
         if (exifInterface.getLatLong(latLong)) {
-            return Pair(latLong[0].toDouble(), latLong[1].toDouble())
+            val latitudeFromHelper = latLong[0].toDouble()
+            val longitudeFromHelper = latLong[1].toDouble()
+            if (GpsCoordinateParser.isPlausibleGpsCoordinates(latitudeFromHelper, longitudeFromHelper)) {
+                return Pair(latitudeFromHelper, longitudeFromHelper)
+            }
         }
 
         return null

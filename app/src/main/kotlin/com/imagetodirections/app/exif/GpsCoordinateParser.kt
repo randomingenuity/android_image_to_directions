@@ -49,6 +49,23 @@ internal object GpsCoordinateParser {
      * @param rational Numerator/denominator pair separated by a slash.
      * @return The floating-point quotient, or null when parsing fails.
      */
+    /**
+     * Returns whether latitude and longitude look like real GPS values.
+     *
+     * EXIF parsers often report 0,0 when GPS tags are present but empty.
+     */
+    fun isPlausibleGpsCoordinates(latitude: Double, longitude: Double): Boolean {
+        if (latitude == 0.0 && longitude == 0.0) {
+            return false
+        }
+
+        if (latitude !in -90.0..90.0 || longitude !in -180.0..180.0) {
+            return false
+        }
+
+        return true
+    }
+
     fun parseRational(rational: String): Double? {
         val pair = rational.split("/")
         if (pair.size != 2) {

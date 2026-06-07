@@ -1,7 +1,9 @@
 package com.imagetodirections.app.exif
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -43,6 +45,24 @@ class GpsCoordinateParserTest {
 
         assertEquals(-26.5821006, latitude!!, 0.0001)
         assertEquals(-80.14456769972223, longitude!!, 0.0001)
+    }
+
+    /**
+     * Verifies the null-island coordinates are treated as invalid GPS.
+     */
+    @Test
+    fun isPlausibleGpsCoordinates_rejectsNullIsland() {
+        assertFalse(GpsCoordinateParser.isPlausibleGpsCoordinates(0.0, 0.0))
+    }
+
+    /**
+     * Verifies normal camera coordinates are accepted.
+     */
+    @Test
+    fun isPlausibleGpsCoordinates_acceptsRealCoordinates() {
+        assertTrue(
+            GpsCoordinateParser.isPlausibleGpsCoordinates(26.5821006, -80.14456769972223),
+        )
     }
 
     /**
