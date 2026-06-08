@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "com.imagetodirections.app"
+    namespace = "com.randomingenuity.image_to_directions"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.imagetodirections.app"
+        applicationId = "com.randomingenuity.image_to_directions"
         minSdk = 24
         targetSdk = 35
         versionCode = 5
