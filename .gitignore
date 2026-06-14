@@ -2,6 +2,7 @@
 /build/
 /app/build/
 /app/release/
+/app/app-release.aab
 
 /local.properties
 
