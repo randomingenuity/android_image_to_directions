@@ -1,0 +1,10 @@
+## This file must *NOT* be checked into Version Control Systems,
+# as it contains information specific to your local configuration.
+#
+# Copy to local.properties and fill in the release signing values.
+sdk.dir=/home/dustin/Android/Sdk
+
+release.store.file=/home/dustin/.android/key/image_to_directions.release.keystore
+release.store.password=
+release.key.alias=key0
+release.key.password=

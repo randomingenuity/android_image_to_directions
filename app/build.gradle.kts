@@ -1,22 +1,53 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
 }
 
+val localProperties = Properties()
+val localPropertiesFile = rootProject.file("local.properties")
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.inputStream().use { inputStream ->
+        localProperties.load(inputStream)
+    }
+}
+
+fun releaseSigningProperty(propertyName: String): String? {
+    return providers.gradleProperty(propertyName).orNull
+        ?: localProperties.getProperty(propertyName)
+}
+
+val releaseStoreFile = releaseSigningProperty("release.store.file")
+
 android {
     namespace = "com.randomingenuity.image_to_directions"
     compileSdk = 35
+
+    signingConfigs {
+        create("release") {
+            releaseStoreFile?.let { storeFilePath ->
+                storeFile = rootProject.file(storeFilePath)
+                storePassword = releaseSigningProperty("release.store.password")
+                keyAlias = releaseSigningProperty("release.key.alias")
+                keyPassword = releaseSigningProperty("release.key.password")
+            }
+        }
+    }
 
     defaultConfig {
         applicationId = "com.randomingenuity.image_to_directions"
         minSdk = 24
         targetSdk = 35
-        versionCode = 6
-        versionName = "1.3.0"
+        versionCode = 7
+        versionName = "1.4.0"
     }
 
     buildTypes {
         release {
+            releaseStoreFile?.let {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

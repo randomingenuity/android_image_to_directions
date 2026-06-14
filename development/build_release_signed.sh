@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIRECTORY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIRECTORY}/.." && pwd)"
 BUILD_GRADLE="${PROJECT_ROOT}/app/build.gradle.kts"
+LOCAL_PROPERTIES="${PROJECT_ROOT}/local.properties"
 RELEASE_BUNDLE="${PROJECT_ROOT}/app/build/outputs/bundle/release/app-release.aab"
 MAPPING_FILE="${PROJECT_ROOT}/app/build/outputs/mapping/release/mapping.txt"
 OUTPUT_BUNDLE="${PROJECT_ROOT}/app/app-release.aab"
@@ -12,8 +13,65 @@ OUTPUT_MAPPING="${PROJECT_ROOT}/app/mapping.txt"
 print_usage() {
     echo "Usage: $(basename "$0") [--increment-major | --increment-minor | --increment-patch]"
     echo ""
-    echo "Builds the release app bundle and copies app-release.aab and mapping.txt to app/."
+    echo "Builds a signed release app bundle and copies app-release.aab and mapping.txt to app/."
+    echo "Requires release signing values in local.properties:"
+    echo "  release.store.file, release.store.password, release.key.alias, release.key.password"
+    echo ""
     echo "Version bump flags are mutually exclusive; versionCode always increases by 1 when a flag is used."
+}
+
+read_local_property() {
+    local property_name="$1"
+    if [[ ! -f "${LOCAL_PROPERTIES}" ]]; then
+        return 1
+    fi
+    grep -E "^[[:space:]]*${property_name}=" "${LOCAL_PROPERTIES}" \
+        | tail -n 1 \
+        | sed -E "s/^[[:space:]]*${property_name}=[[:space:]]*//" \
+        | sed -E 's/[[:space:]]+$//'
+}
+
+require_release_signing_configuration() {
+    local store_file store_password key_alias key_password resolved_store_file
+
+    store_file="${RELEASE_STORE_FILE:-$(read_local_property "release.store.file" || true)}"
+    store_password="${RELEASE_STORE_PASSWORD:-$(read_local_property "release.store.password" || true)}"
+    key_alias="${RELEASE_KEY_ALIAS:-$(read_local_property "release.key.alias" || true)}"
+    key_password="${RELEASE_KEY_PASSWORD:-$(read_local_property "release.key.password" || true)}"
+
+    if [[ -z "${store_file}" || -z "${store_password}" || -z "${key_alias}" || -z "${key_password}" ]]; then
+        echo "Release signing is not configured." >&2
+        echo "Add release.store.file, release.store.password, release.key.alias, and release.key.password to ${LOCAL_PROPERTIES}." >&2
+        echo "See local.properties.example for the expected format." >&2
+        exit 1
+    fi
+
+    if [[ "${store_file}" = /* ]]; then
+        resolved_store_file="${store_file}"
+    else
+        resolved_store_file="${PROJECT_ROOT}/${store_file}"
+    fi
+
+    if [[ ! -f "${resolved_store_file}" ]]; then
+        echo "Release keystore not found at ${resolved_store_file}" >&2
+        exit 1
+    fi
+
+    export RELEASE_STORE_FILE="${store_file}"
+    export RELEASE_STORE_PASSWORD="${store_password}"
+    export RELEASE_KEY_ALIAS="${key_alias}"
+    export RELEASE_KEY_PASSWORD="${key_password}"
+}
+
+verify_signed_release_bundle() {
+    local bundle_path="$1"
+
+    if ! jarsigner -verify "${bundle_path}" >/dev/null 2>&1; then
+        echo "Release bundle signature verification failed for ${bundle_path}" >&2
+        exit 1
+    fi
+
+    echo "Release bundle signature verified."
 }
 
 read_version_code() {
@@ -113,6 +171,8 @@ if [[ ! -f "${BUILD_GRADLE}" ]]; then
     exit 1
 fi
 
+require_release_signing_configuration
+
 cd "${PROJECT_ROOT}"
 
 if [[ -n "${INCREMENT_KIND}" ]]; then
@@ -127,8 +187,12 @@ if [[ -n "${INCREMENT_KIND}" ]]; then
     echo "Version updated: ${CURRENT_VERSION_NAME} (${CURRENT_VERSION_CODE}) -> ${NEW_VERSION_NAME} (${NEW_VERSION_CODE})"
 fi
 
-echo "Running release build..."
-./gradlew bundleRelease
+echo "Running signed release build..."
+./gradlew bundleRelease \
+    -Prelease.store.file="${RELEASE_STORE_FILE}" \
+    -Prelease.store.password="${RELEASE_STORE_PASSWORD}" \
+    -Prelease.key.alias="${RELEASE_KEY_ALIAS}" \
+    -Prelease.key.password="${RELEASE_KEY_PASSWORD}"
 
 if [[ ! -f "${RELEASE_BUNDLE}" ]]; then
     echo "Release bundle not found at ${RELEASE_BUNDLE}" >&2
@@ -140,8 +204,12 @@ if [[ ! -f "${MAPPING_FILE}" ]]; then
     exit 1
 fi
 
+verify_signed_release_bundle "${RELEASE_BUNDLE}"
+
 cp "${RELEASE_BUNDLE}" "${OUTPUT_BUNDLE}"
 cp "${MAPPING_FILE}" "${OUTPUT_MAPPING}"
+
+verify_signed_release_bundle "${OUTPUT_BUNDLE}"
 
 echo "Copied ${OUTPUT_BUNDLE}"
 echo "Copied ${OUTPUT_MAPPING}"
